@@ -1,0 +1,1091 @@
+{
+  "name": "Autonomous AI website Builder",
+  "nodes": [
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "wp_admin_user",
+              "value": "={{ $json.wp_admin_user }}"
+            },
+            {
+              "name": "wp_admin_pass",
+              "value": "={{ $json.wp_admin_pass }}"
+            },
+            {
+              "name": "wp_admin_email",
+              "value": "={{ $json.wp_admin_email }}"
+            },
+            {
+              "name": "domain",
+              "value": "={{ $json.domain }}"
+            },
+            {
+              "name": "service_name",
+              "value": "={{ $json.service_name }}"
+            },
+            {
+              "name": "Website creation prompt",
+              "value": "={{ $json['Website creation prompt'] }}"
+            },
+            {
+              "name": "Industry",
+              "value": "={{ $json.Industry }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c4e3a747-ca19-47e6-8389-1754d2c4909d",
+      "name": "Config Variables7",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. GET INPUT\n// Use $input.item.json to get data entering this node directly.\n// This is faster and prevents \"stuck\" states caused by upstream lookups.\nconst rawDomain = $input.item.json.domain;\n\n// Clean Domain logic\n// Added a safer Regex check (/\\/$/) to remove trailing slash only if it exists\nconst domain = rawDomain.replace('https://', '').replace('http://', '').replace(/\\/$/, '');\nconst routerName = 'wp-' + Math.floor(Math.random() * 100000); \n\n// 2. DEFINE DOCKER COMPOSE\nconst dockerCompose = `version: '3.8'\nservices:\n  wordpress:\n    image: wordpress:latest\n    volumes:\n      - wordpress_data:/var/www/html\n    environment:\n      - WORDPRESS_DB_HOST=mysql\n      - WORDPRESS_DB_USER=root\n      - WORDPRESS_DB_PASSWORD=rootpassword\n      - WORDPRESS_DB_NAME=wordpress\n    networks:\n      - coolify\n    labels:\n      - \"traefik.enable=true\"\n      - \"traefik.http.routers.${routerName}.rule=Host(\\`${domain}\\`)\"\n      - \"traefik.http.routers.${routerName}.entrypoints=https\"\n      - \"traefik.http.routers.${routerName}.tls.certresolver=letsencrypt\"\n      - \"traefik.http.services.${routerName}.loadbalancer.server.port=80\"\n  mysql:\n    image: mysql:5.7\n    volumes:\n      - mysql_data:/var/lib/mysql\n    environment:\n      - MYSQL_ROOT_PASSWORD=rootpassword\n      - MYSQL_DATABASE=wordpress\n    networks:\n      - coolify\nvolumes:\n  wordpress_data:\n  mysql_data:\nnetworks:\n  coolify:\n    external: true`;\n\n// 3. RETURN\n// Returning a clean object here will map it to the output JSON\nreturn {\n  encoded_yaml: Buffer.from(dockerCompose).toString('base64'),\n  clean_domain: domain\n};"
+      },
+      "id": "b06f6736-d526-40d9-a762-2864da438e44",
+      "name": "Prepare YAML (Base64)4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1952,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer "
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $('Config Variables7').item.json.service_name }}"
+            },
+            {
+              "name": "project_uuid"
+            },
+            {
+              "name": "server_uuid"
+            },
+            {
+              "name": "environment_name",
+              "value": "production"
+            },
+            {
+              "name": "docker_compose_raw",
+              "value": "={{ $json.encoded_yaml }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e24819cf-a722-4285-b7b9-a2117c6d76b3",
+      "name": "Create Service3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2176,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer "
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "uuid",
+              "value": "={{ $('Create Service3').item.json.uuid }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f9dc6f6b-edf5-488f-a4d1-2c595dab7f22",
+      "name": "Deploy Service5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2400,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 120,
+        "unit": "seconds"
+      },
+      "id": "8b22b9fc-c5e9-4ebb-9cc1-ed53b38b3655",
+      "name": "Wait for Deployment7",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        2624,
+        256
+      ],
+      "webhookId": "wait-deployment-webhook"
+    },
+    {
+      "parameters": {
+        "command": "=# Load Variables\nWP_URL=\"{{ $('Config Variables7').item.json.domain }}\"\nWP_TITLE=\"{{ $('Config Variables7').item.json.service_name }}\"\nWP_USER=\"{{ $('Config Variables7').item.json.wp_admin_user }}\"\nWP_PASS=\"{{ $('Config Variables7').item.json.wp_admin_pass }}\"\nWP_EMAIL=\"{{ $('Config Variables7').item.json.wp_admin_email }}\"\n\n# 1. Find Container ID\nCONTAINER_ID=$(docker ps -q --filter \"ancestor=wordpress:latest\" | head -n 1)\n\necho \"Found Container: $CONTAINER_ID\"\n\nif [ -z \"$CONTAINER_ID\" ]; then\n  echo \"Error: No running WordPress container found.\"\n  exit 1\nfi\n\n# 2. INSTALL WP-CLI (Fixing the 'executable not found' error)\necho \"Checking for WP-CLI...\"\n# We run a quick script inside the container to download WP-CLI if it doesn't exist\ndocker exec $CONTAINER_ID sh -c \"\n  if ! command -v wp > /dev/null; then\n    echo 'Installing WP-CLI...';\n    curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar;\n    chmod +x wp-cli.phar;\n    mv wp-cli.phar /usr/local/bin/wp;\n  fi\n\"\n\n# 3. Run Install\necho \"Installing WordPress...\"\ndocker exec $CONTAINER_ID wp core install --allow-root \\\n  --url=\"$WP_URL\" \\\n  --title=\"$WP_TITLE\" \\\n  --admin_user=\"$WP_USER\" \\\n  --admin_password=\"$WP_PASS\" \\\n  --admin_email=\"$WP_EMAIL\"\n\n# 4. Fix Domain Settings\ndocker exec $CONTAINER_ID wp option update siteurl \"$WP_URL\" --allow-root\ndocker exec $CONTAINER_ID wp option update home \"$WP_URL\" --allow-root\n\n# 5. INSTALL ELEMENTOR (Added Step)\necho \"Installing Elementor...\"\ndocker exec $CONTAINER_ID wp plugin install elementor --activate --allow-root\n\n# 6. Create App Password\nAPP_PASS=$(docker exec $CONTAINER_ID wp user application-password create $WP_USER \"n8n-automation\" --porcelain --allow-root)\n\necho \"APP_PASSWORD_RESULT:$APP_PASS\""
+      },
+      "id": "34071c72-f540-4bfc-8bca-14a8100e6722",
+      "name": "SSH - Run Install Script",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        2848,
+        256
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "6Cp7KGRtbq32P6Tf",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get immediate input (SSH Output)\nconst output = $input.item.json.stdout;\n\n// 2. Extract Password\n// Refined regex to capture exactly the 24-char password\nconst passwordRegex = /APP_PASSWORD_RESULT:\\s*([a-zA-Z0-9]{24,})/; \nconst match = output.match(passwordRegex);\n\nlet appPassword = \"Password_Not_Found\";\nif (match && match[1]) {\n  appPassword = match[1].trim();\n}\n\n// 3. Get Config Variables safely\n// We use .first().json because we just want the initial config data\n// irrespective of the current item index.\nconst configData = $('Config Variables7').first().json;\n\nreturn {\n  \"wp_url\": configData.domain,\n  \"wp_user\": configData.wp_admin_user,\n  \"wp_password\": configData.wp_admin_pass,\n  \"app_password\": appPassword,\n  \"status\": \"Installation Complete\"\n};"
+      },
+      "id": "aa78f8da-d68c-46fc-ac5f-456ca3bbb293",
+      "name": "Parse Credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        3072,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3296,
+        256
+      ],
+      "id": "7f966b2b-df1e-4b8b-931b-4ec8b572b313",
+      "name": "Wait",
+      "webhookId": "522b6ece-6ee2-4ed6-97ba-044fc3ff4f04"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('On form submission').item.json['Website creation prompt'] }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are a professional web developer and content strategist.\n1. Research the industry: {{ $('On form submission').item.json.Industry }}.\n2. Identify the top 5 essential pages needed for this type of website (e.g., Home, About, Services, Contact, FAQ).\n3. For EACH page, write a highly detailed, distinct prompt that I can feed to another AI to generate the actual HTML content. The prompt must include instructions for layout, color scheme, and specific sections.\n\nIMPORTANT: You must output ONLY a valid JSON array. Do not include markdown formatting like ```json.\nStructure:\n[\n  {\n    \"page_title\": \"Home Page\",\n    \"html_generation_prompt\": \"Create a modern landing page for a [industry] site. Include a hero section with...\"\n  },\n  {\n    \"page_title\": \"About Us\",\n    \"html_generation_prompt\": \"Create an About page focusing on...\"\n  }\n]"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        3840,
+        256
+      ],
+      "id": "c1587501-a413-45e2-85d1-7294dfdee466",
+      "name": "Head Website Developer AI"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Receives requirements from Head Developer AI including: business type, target audience, goals, and any specific page requirements. Returns structured site-map with page hierarchy, navigation recommendations, and content organization strategy.",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', `requirements from Head Developer AI including: business type, target audience, goals, and any specific page requirements. `, 'string') }}",
+        "options": {
+          "systemMessage": "You are an expert Information Architect and Site-map Designer. Your specialty is creating logical, user-friendly website structures that optimize navigation and user experience.\n\nPRIMARY FUNCTION:\nCreate comprehensive site-maps and information architectures for WordPress websites based on business requirements and industry best practices.\n\nDELIVERABLES:\n1. **Hierarchical Site Structure**\n   - Main navigation pages (top-level)\n   - Sub-pages and nested sections\n   - Recommended page depth (max 3 clicks to any content)\n   \n2. **Page Definitions**\n   - Page name and slug (URL-friendly)\n   - Purpose and primary content focus\n   - Target audience for each page\n   - SEO considerations\n\n3. **Navigation Recommendations**\n   - Header menu structure\n   - Footer menu links\n   - Sidebar widgets (if applicable)\n   - Call-to-action placements\n\n4. **Content Hierarchy**\n   - Priority pages (most important first)\n   - User journey mapping\n   - Conversion funnel integration\n\nBEST PRACTICES TO FOLLOW:\n- Keep main navigation to 5-7 items maximum\n- Group related content under logical parent pages\n- Consider mobile navigation constraints\n- Include essential pages: Home, About, Services/Products, Contact\n- Plan for scalability (room to add content later)\n- Follow industry-standard naming conventions\n- Optimize for both users and search engines\n\nOUTPUT FORMAT:\nPresent site-maps in a clear, structured format:\n- Tree diagram (ASCII or described hierarchy)\n- Table with columns: Page Name | URL Slug | Parent Page | Priority | Purpose\n- Navigation flow diagram description\n\nINDUSTRY CONSIDERATIONS:\n- E-commerce: Products, Categories, Cart, Checkout\n- Service Business: Services, Portfolio, Testimonials, Booking\n- Blog/Content: Categories, Tags, Archive, Author Pages\n- Corporate: About, Team, Careers, Press, Investors\n\nAsk clarifying questions about:\n- Business type and goals\n- Target audience\n- Required functionality (e-commerce, booking, etc.)\n- Content volume expectations\n- Special page requirements"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        3600,
+        480
+      ],
+      "id": "0674c053-eff4-4cd5-997f-8f7b3c4989b5",
+      "name": "Site-map Creator AI Agent tool"
+    },
+    {
+      "parameters": {
+        "toolDescription": "AI Agent that Receives business context from Head Developer AI including: business name, industry, target market, location, products/services, and specific research questions. Returns comprehensive research report with competitor analysis, industry trends, audience insights, and strategic recommendations for website development.\n  ",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', `business context from Head Developer AI including: business name, industry, target market, location, products/services, and specific research questions`, 'string') }}",
+        "options": {
+          "systemMessage": "You are an expert Business Analyst and Market Researcher specializing in competitive analysis, industry trends, and digital presence evaluation for web development projects.\n\nPRIMARY FUNCTION:\nConduct comprehensive research to inform website strategy, content direction, and competitive positioning. Provide data-driven insights that shape website structure, messaging, and features.\n\nRESEARCH AREAS:\n\n1. **Industry Analysis**\n   - Current market trends and dynamics\n   - Industry-specific web design conventions\n   - Common features and functionality expectations\n   - Emerging technologies in the sector\n   - Regulatory or compliance considerations\n   - Seasonal factors affecting the business\n\n2. **Competitor Analysis**\n   - Identify top 5-10 direct competitors\n   - Analyze competitor websites:\n     * Site structure and navigation\n     * Key features and functionality\n     * Design aesthetics and user experience\n     * Content strategy and messaging\n     * Call-to-action placements\n     * Mobile responsiveness\n     * Loading speed and performance\n   - Identify gaps and opportunities\n   - Benchmark best practices\n\n3. **Target Audience Research**\n   - Demographics and psychographics\n   - Online behavior patterns\n   - Device usage preferences (mobile vs desktop)\n   - Pain points and needs\n   - Search intent and keywords\n   - Content consumption preferences\n   - Trust factors and decision criteria\n\n4. **Content Strategy Insights**\n   - High-performing content types in the industry\n   - Trending topics and keywords\n   - Content gaps in competitor offerings\n   - SEO opportunities and keyword difficulty\n   - Voice and tone preferences\n   - Multimedia usage (video, podcasts, infographics)\n\n5. **Technical Requirements**\n   - Must-have features for the industry\n   - Integration needs (CRM, booking, e-commerce)\n   - Security and compliance requirements\n   - Performance benchmarks\n   - Mobile-first considerations\n   - Accessibility standards\n\n6. **SEO and Digital Marketing**\n   - Keyword research and opportunities\n   - Local SEO factors (if applicable)\n   - Backlink opportunities\n   - Social media presence standards\n   - Review and reputation management\n   - Google Business Profile optimization\n\nRESEARCH METHODOLOGY:\n1. Use Searxng tool to find current information\n2. Analyze multiple sources for balanced insights\n3. Prioritize recent data (last 6-12 months)\n4. Cross-reference findings for accuracy\n5. Provide source citations when possible\n6. Identify both data and expert opinions\n\nSEARXNG SEARCH STRATEGIES:\n- \"[Industry] website trends 2024/2025\"\n- \"[Competitor name] website features\"\n- \"Best [industry] websites design\"\n- \"[Business type] customer expectations\"\n- \"[Industry] web design best practices\"\n- \"[Service/Product] online user behavior\"\n- \"[Location] [industry] competitive analysis\"\n\nOUTPUT FORMAT:\n\n**Executive Summary**\n- Key findings (3-5 bullet points)\n- Critical recommendations for website\n\n**Detailed Findings**\n1. Industry Landscape\n   - Current state and trends\n   - Opportunities and threats\n\n2. Competitive Analysis\n   - Competitor comparison table\n   - Strengths to emulate\n   - Weaknesses to exploit\n   - Feature gaps to fill\n\n3. Audience Insights\n   - User personas summary\n   - Behavioral patterns\n   - Content preferences\n\n4. Recommendations\n   - Must-have features\n   - Nice-to-have features\n   - Content strategy direction\n   - Differentiation opportunities\n   - Technical requirements\n\n5. SEO & Marketing\n   - Keyword opportunities\n   - Content topics\n   - Marketing channel recommendations\n\n**Sources and Citations**\n- List all sources consulted\n- Include URLs when available\n\nCRITICAL GUIDELINES:\n- Focus on actionable insights, not just data\n- Prioritize findings that directly impact website decisions\n- Balance industry standards with differentiation opportunities\n- Consider budget and timeline constraints\n- Flag any red flags or critical competitive threats\n- Provide specific examples from competitor sites\n- Quantify findings when possible (e.g., \"80% of competitors use...\")\n\nDELIVERABLE TIMING:\n- This research should be completed EARLY in the project\n- Findings inform all downstream decisions\n- Update research if project scope changes significantly"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        3872,
+        464
+      ],
+      "id": "37572764-48b8-44e8-be3c-68da64952114",
+      "name": "Business Researcher AI Agent Tool"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Receives brand information from Head Developer AI including: business name, industry, target audience, brand personality, and any existing brand guidelines. Returns complete color palette with HEX codes, font pairings from Google Fonts, CSS variables, and accessibility-compliant design system.",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', `brand information from Head Developer AI including: business name, industry, target audience, brand personality, and any existing brand guidelines. `, 'string') }}",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "=You are an expert Brand Designer and Visual Identity Specialist focusing on typography and color theory for web design. Your role is to create cohesive, accessible, and on-brand color schemes and font pairings for WordPress websites.\n\nPRIMARY FUNCTION:\nAnalyze the business, industry, and target audience to recommend professional color palettes and font combinations that enhance brand identity and user experience.\n\nDELIVERABLES:\n\n1. **Color Palette**\n   - Primary color (main brand color) - HEX, RGB\n   - Secondary color (complementary/accent) - HEX, RGB\n   - Tertiary colors (2-3 supporting colors) - HEX, RGB\n   - Neutral colors (backgrounds, text) - HEX, RGB\n   - Success/Error/Warning colors (UI states) - HEX, RGB\n   - Color usage guidelines (where to use each)\n\n2. **Typography System**\n   - Heading font (H1-H6) with family name and fallbacks\n   - Body text font with family name and fallbacks\n   - Accent/Display font (optional) for special elements\n   - Font sizes scale (mobile and desktop)\n   - Line heights and letter spacing\n   - Font weights to use (400, 600, 700, etc.)\n\n3. **Accessibility Compliance**\n   - WCAG AA contrast ratios verified\n   - Readable font sizes (min 16px for body)\n   - Color-blind friendly combinations\n   - Sufficient spacing for readability\n\n4. **Google Fonts Integration**\n   - Specific Google Fonts recommendations\n   - Font loading optimization\n   - Fallback font stacks\n   - Variable font usage if applicable\n\n5. **CSS Variables Structure**\n   ```css\n   :root {\n     --color-primary: #...;\n     --color-secondary: #...;\n     --font-heading: '...', sans-serif;\n     --font-body: '...', sans-serif;\n   }\n   ```\n\nDESIGN PRINCIPLES:\n- Match colors to industry psychology (e.g., blue for trust, green for eco)\n- Ensure 4.5:1 contrast ratio for normal text\n- Limit palette to 5-7 colors maximum\n- Choose font pairings with visual contrast (serif + sans-serif)\n- Consider brand personality (modern, traditional, playful, serious)\n- Optimize for screen readability\n- Provide dark mode alternatives when appropriate\n\nINDUSTRY COLOR ASSOCIATIONS:\n- Technology: Blues, grays, electric accents\n- Health/Wellness: Greens, soft blues, earth tones\n- Finance: Navy, gold, gray, trust colors\n- Creative: Bold, vibrant, unconventional\n- Luxury: Black, gold, deep purples\n- Food: Warm reds, oranges, appetizing tones\n- Education: Blues, academic tones, accessible\n\nFONT PERSONALITY GUIDE:\n- Serif: Traditional, trustworthy, editorial\n- Sans-serif: Modern, clean, approachable\n- Display: Unique, attention-grabbing, sparingly used\n- Monospace: Technical, code-related content\n\nRESEARCH CAPABILITIES:\n- Use Searxng tool to research current design trends\n- Look up successful competitors' color schemes\n- Find industry-standard design patterns\n- Discover popular Google Font pairings\n\nOUTPUT FORMAT:\nProvide a complete design system document including:\n1. Visual color palette with HEX codes\n2. Font pairing recommendations with reasoning\n3. CSS variables ready to implement\n4. Usage guidelines for developers\n5. Accessibility notes"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        4112,
+        528
+      ],
+      "id": "37b2159e-bbe8-4d73-a8b9-be4f7403cf43",
+      "name": "website fonts and colors expert AI Agent Tool"
+    },
+    {
+      "parameters": {
+        "model": "x-ai/grok-4.1-fast",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        3712,
+        688
+      ],
+      "id": "9b058d74-688e-4883-8696-b93ac57dfb1a",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "kh54T9o4h8iCvjlW",
+          "name": "Anagata Openrouter"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Search query for design research.",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', `Search Query`, 'string') }}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "pageno",
+              "value": "1"
+            },
+            {
+              "name": "max_results",
+              "value": "10"
+            },
+            {
+              "name": "apikey"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        3904,
+        736
+      ],
+      "id": "00832904-82b9-4e22-959c-8fa4798d7c08",
+      "name": "Web Search"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Search query for font, css, animations free open source libraries research.",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', `Search Query`, 'string') }}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "pageno",
+              "value": "1"
+            },
+            {
+              "name": "max_results",
+              "value": "10"
+            },
+            {
+              "name": "apikey"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        4080,
+        688
+      ],
+      "id": "fa3002da-cfb7-4462-b7c3-adf4636668bf",
+      "name": "Web Search1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the output from the previous Agent\nconst aiOutput = $input.first().json.output;\n\nlet parsedData;\n\n// Check if it's a string (needs parsing) or already an object/array\nif (typeof aiOutput === 'string') {\n  // Clean up markdown if it exists\n  const cleanJson = aiOutput.replace(/```json/g, '').replace(/```/g, '');\n  parsedData = JSON.parse(cleanJson);\n} else {\n  // It is already an object/array, use it directly\n  parsedData = aiOutput;\n}\n\n// Ensure it is an array so the map function works\nif (!Array.isArray(parsedData)) {\n  parsedData = [parsedData];\n}\n\n// Return as n8n items\nreturn parsedData.map(item => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        256
+      ],
+      "id": "f9046a60-d58f-4599-a5cf-20fa64c92cbd",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "[\n  {\n    \"page_title\": \"Home Page\",\n    \"html_generation_prompt\": \"Create a modern landing page for a [industry] site. Include a hero section with...\"\n  },\n  {\n    \"page_title\": \"About Us\",\n    \"html_generation_prompt\": \"Create an About page focusing on...\"\n  }\n]"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        4240,
+        368
+      ],
+      "id": "3b6d7ea9-7e2c-4510-81fe-cb50c3f6abf7",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "formTitle": "Anagata Wordpress Website Creator",
+        "formDescription": "Please be Patient It may take around 20 mins.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "wp_admin_user",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "wp_admin_pass",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "wp_admin_email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "domain"
+            },
+            {
+              "fieldLabel": "service_name"
+            },
+            {
+              "fieldLabel": "Website creation prompt"
+            },
+            {
+              "fieldLabel": "Industry"
+            },
+            {
+              "fieldLabel": "contact_webhook_url"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        256
+      ],
+      "id": "026fdb59-8963-4f1e-af4c-5ed389d3c8f5",
+      "name": "On form submission",
+      "webhookId": "62e28660-86af-41a3-a970-e3dec959e8f8"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Industry: {{ $('Config Variables7').item.json.Industry }}\nBrand Name: {{ $('Config Variables7').item.json.service_name }}\n\nTask: Create the Global Design System (Header, Footer, CSS).",
+        "options": {
+          "systemMessage": "=You are a UI/UX Architect. \n\n### TASK:\nGenerate the Global HTML/CSS assets that will be used on EVERY page of the website to ensure consistency.\n\n### OUTPUT JSON FORMAT:\nYou must output a valid JSON object with these 3 keys:\n{\n  \"global_css\": \"...all your :root variables, reset, and typography styles. Ensure #wp-custom-spa has width: 100vw...\",\n  \"html_header\": \"...the <header> html code...\",\n  \"html_footer\": \"...the <footer> html code...\"\n}\n\n### DESIGN RULES:\n1. **CSS:** Include a robust CSS reset, variables for colors/fonts, and responsive container styles. \n2. **HEADER:** \n   - Must use `<header class=\"wpci-header\">`.\n   - Include the Logo (Brand Name).\n   - **CRITICAL:** Inside the `<nav>`, do NOT create links. Just put this exact placeholder: `<!-- DYNAMIC_NAV_LINKS -->`. The system will inject the real links later.\n3. **FOOTER:** \n   - Must use `<footer class=\"wpci-footer\">`.\n   - Include copyright ({{ new Date().getFullYear() }}) and placeholder social links.\n4. **STYLE:** Modern, Glassmorphism, tailored to the Industry.\n\n### NO MARKDOWN:\nReturn ONLY the JSON. Do not use ```json."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        4704,
+        256
+      ],
+      "id": "6703a392-862b-4dc6-ab4a-7c3c05b58fa6",
+      "name": "Layout Designer AI",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the list of pages from the Head Developer node\nconst pagesData = $('Head Website Developer AI').first().json.output;\n\nlet pagesArray = [];\n\n// Handle if it's a string (AI didn't output pure JSON) or object\nif (typeof pagesData === 'string') {\n   try { pagesArray = JSON.parse(pagesData); } catch(e) {}\n} else {\n   pagesArray = pagesData;\n}\n\n// 2. Pass the pages to the loop\n// We filter just to be safe we have an array\nif (!Array.isArray(pagesArray)) pagesArray = [pagesArray];\n\nreturn pagesArray.map(page => ({ json: page }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5056,
+        256
+      ],
+      "id": "33461b70-4059-4b93-8b79-b8e8c007a852",
+      "name": "Prepare Loop"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Page Title: {{ $json.page_title }}\nRequirements: {{ $json.html_generation_prompt }}",
+        "options": {
+          "systemMessage": "=You are an elite Frontend Architect.\n\n### TASK:\nGenerate the MAIN CONTENT HTML for the page: \"{{ $json.page_title }}\".\n\n### CONTEXT:\nThe Header and Footer are already generated. **DO NOT** generate <header>, <footer>, <body>, or <html> tags.\n**GENERATE ONLY** the specific `<section>` blocks that go inside the `<main>` tag.\n\n### INPUT DATA:\nIndustry: {{ $('Config Variables7').first().json.Industry }}\nRequirements: {{ $json.html_generation_prompt }}\n\n### SPECIAL LOGIC:\n- If Page is **Contact**: Return a form `<form id=\"wpci-contact\"> ...Inputs... <button>Send</button></form>`.\n- If Page is **Blog**: Return `<div id=\"wp-ai-blog-feed\"></div>` (The global script will handle the fetch).\n\n### OUTPUT RULES:\n1. Start with `<!-- wp:content -->` and end with `<!-- /wp:content -->`.\n2. Use `<section class=\"wpci-section\">` for each block.\n3. Use Vanilla HTML/CSS only. No external libraries."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        5504,
+        256
+      ],
+      "id": "efb9084b-59b5-4e7f-be8b-e922a769f789",
+      "name": "Page Content AI"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get Global Layout (Header, Footer, CSS)\nconst rawLayout = $('Layout Designer AI').first().json;\nlet layout = rawLayout;\n\n// Parse AI JSON output safely\nif (typeof rawLayout.output === 'string') {\n    try {\n        const cleanJson = rawLayout.output.replace(/```json/g, '').replace(/```/g, '');\n        layout = JSON.parse(cleanJson);\n    } catch (e) {\n        throw new Error(\"Failed to parse Layout Designer JSON.\");\n    }\n}\n\n// 2. Get Page Content & Title\nconst pageContent = $input.item.json.output || '';\nconst currentTitle = $input.item.json.page_title;\n\n// 3. Get Sitemap\nconst getSitemap = () => {\n    const rawData = $('Head Website Developer AI').first().json.output;\n    if (typeof rawData === 'string') {\n        try { return JSON.parse(rawData); } catch(e) { return []; }\n    }\n    return Array.isArray(rawData) ? rawData : [];\n};\nconst sitemap = getSitemap();\n\n// 4. Build Navigation\nconst navLinks = sitemap.map(page => {\n  let slug = page.page_title.toLowerCase().replace(/ /g, '-');\n  if (slug.includes('home')) slug = '/';\n  else slug = '/' + slug;\n  \n  const isActive = (page.page_title === currentTitle) ? 'active' : '';\n  return `<a href=\"${slug}\" class=\"wpci-nav-link ${isActive}\">${page.page_title.replace(' Page', '')}</a>`;\n}).join('\\n');\n\n// 5. Inject Nav\nconst finalHeader = layout.html_header.replace('<!-- DYNAMIC_NAV_LINKS -->', navLinks);\n\n// 6. Scripts (Robust Form Handler)\n// --- CORRECTION HERE: Gets URL from 'On form submission' ---\nlet webhookUrl = $('On form submission').first().json.contact_webhook_url;\n\n// Safety fallback for testing\nif (!webhookUrl) {\n    webhookUrl = ''; \n    console.log(\"Warning: contact_webhook_url not found in 'On form submission' node.\");\n}\n\nconst globalScripts = `\n<script>\ndocument.addEventListener(\"DOMContentLoaded\", function() {\n    console.log(\"SPA Scripts Loaded\");\n\n    // 1. Contact Form Handler\n    const contactForm = document.getElementById('wpci-contact');\n    if(contactForm) {\n        console.log(\"Contact Form Found\");\n        contactForm.addEventListener('submit', function(e) {\n            e.preventDefault();\n            \n            const webhook = \"${webhookUrl}\";\n            \n            if(!webhook || webhook === \"undefined\") {\n                alert(\"Configuration Error: Contact Webhook URL is missing.\");\n                console.error(\"Missing webhook URL. Check n8n 'On form submission' node.\");\n                return;\n            }\n\n            const data = Object.fromEntries(new FormData(e.target));\n            \n            // ROBUST BUTTON SELECTOR: Handles <button> OR <input type=\"submit\">\n            const btn = e.target.querySelector('button[type=\"submit\"], input[type=\"submit\"], button');\n            \n            if(btn) {\n                if(btn.tagName === 'INPUT') btn.value = 'Sending...';\n                else btn.innerText = 'Sending...';\n                btn.disabled = true;\n            }\n            \n            fetch(webhook, {\n                method: 'POST', \n                body: JSON.stringify(data), \n                headers: {'Content-Type': 'application/json'}\n            })\n            .then(response => {\n                if (response.ok) {\n                    if(btn) {\n                        if(btn.tagName === 'INPUT') btn.value = 'Sent!';\n                        else btn.innerText = 'Sent!';\n                    }\n                    contactForm.reset();\n                    alert(\"Message Sent Successfully!\");\n                } else {\n                    throw new Error(\"Server returned \" + response.status);\n                }\n            })\n            .catch(err => {\n                console.error(\"Form Error:\", err);\n                if(btn) {\n                    if(btn.tagName === 'INPUT') btn.value = 'Error';\n                    else btn.innerText = 'Error';\n                    btn.disabled = false;\n                }\n                alert(\"Could not send message. Please check console.\");\n            });\n        });\n    }\n\n    // 2. Blog Fetcher\n    const blogFeed = document.getElementById('wp-ai-blog-feed');\n    if(blogFeed) {\n        blogFeed.innerHTML = '<div class=\"wpci-loader\">Loading Updates...</div>';\n        fetch('/wp-json/wp/v2/posts?_embed&per_page=6')\n        .then(r => r.json())\n        .then(posts => {\n            if(!posts || posts.length === 0) {\n                 blogFeed.innerHTML = '<p>No recent updates.</p>';\n                 return;\n            }\n            blogFeed.innerHTML = posts.map(p => {\n               const img = p._embedded['wp:featuredmedia'] ? p._embedded['wp:featuredmedia'][0].source_url : '';\n               return '<article class=\"wpci-card\">' + \n                      (img ? '<img src=\"'+img+'\" alt=\"'+p.title.rendered+'\">' : '') +\n                      '<h3><a href=\"'+p.link+'\">'+p.title.rendered+'</a></h3>' +\n                      '<div class=\"excerpt\">'+p.excerpt.rendered+'</div>' +\n                      '</article>';\n            }).join('');\n        }).catch(e => blogFeed.innerHTML = 'Unable to load posts.');\n    }\n});\n</script>\n`;\n\n// 7. Get Credentials\nconst creds = $('Parse Credentials').first().json;\nconst authString = Buffer.from(creds.wp_user + ':' + creds.app_password).toString('base64');\n\n// 8. Assemble\nconst finalHtml = `\n<!-- wp:html -->\n<style>${layout.global_css}</style>\n<div id=\"wp-custom-spa\">\n    ${finalHeader}\n    <main class=\"wpci-main\">\n        ${pageContent}\n    </main>\n    ${layout.html_footer}\n</div>\n${globalScripts}\n<!-- /wp:html -->\n`;\n\n// 9. Return\nreturn {\n  json: {\n    page_title: currentTitle,\n    output: finalHtml,\n    auth_header: `Basic ${authString}`\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5856,
+        256
+      ],
+      "id": "398e7f87-2e21-49e1-8933-f5d04b335833",
+      "name": "Assemble & Auth"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        5280,
+        256
+      ],
+      "id": "6e581ed9-a46f-4f52-b526-9228625810f2",
+      "name": "Loop Over Items2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Variables7').first().json.domain }}/wp-json/wp/v2/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.auth_header }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "title",
+              "value": "={{ $('Loop Over Items2').item.json.page_title }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.output }}"
+            },
+            {
+              "name": "template",
+              "value": "elementor_canvas"
+            },
+            {
+              "name": "status",
+              "value": "publish"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        6080,
+        288
+      ],
+      "id": "6751adb0-dfdc-4a89-98c8-9d48c5f26678",
+      "name": "HTTP Request2",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "command": "=# 1. Load Variables\nCONTAINER_ID=$(docker ps -q --filter \"ancestor=wordpress:latest\" | head -n 1)\n\nif [ -z \"$CONTAINER_ID\" ]; then\n  echo \"Error: No running WordPress container found.\"\n  exit 1\nfi\n\n# Wrapper for WP-CLI command inside docker\nrun_wp() {\n    docker exec $CONTAINER_ID wp \"$@\" --allow-root\n}\n\necho \"Configuring WordPress Settings...\"\n\n# 2. Install Hello Elementor (Best lightweight theme for Canvas)\nrun_wp theme install hello-elementor --activate\n\n# 3. Identify the Home Page\n# We search for a page named exactly \"Home\" or \"Home Page\"\n# The AI should have created one of these based on the prompt\nHOME_ID=$(run_wp post list --post_type=page --name=\"home\" --field=ID --format=ids)\n\n# Fallback if AI named it \"Home Page\"\nif [ -z \"$HOME_ID\" ]; then\n  HOME_ID=$(run_wp post list --post_type=page --name=\"home-page\" --field=ID --format=ids)\nfi\n\n# 4. Set the Homepage\nif [ ! -z \"$HOME_ID\" ]; then\n    echo \"Setting Home Page to ID: $HOME_ID\"\n    run_wp option update show_on_front page\n    run_wp option update page_on_front $HOME_ID\nelse\n    echo \"Warning: Could not find a page named 'Home'. Homepage not set.\"\nfi\n\n# 5. Set Permalinks to Post Name (Essential for AI's /slug links to work)\nrun_wp rewrite structure '/%postname%/'\nrun_wp rewrite flush\n\necho \"Configuration Complete\""
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        6544,
+        -112
+      ],
+      "id": "006d195a-91b5-448f-a0f9-60accf4e337a",
+      "name": "Execute a command2",
+      "credentials": {
+        "sshPassword": {
+          "id": "6Cp7KGRtbq32P6Tf",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-3-pro-preview",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        4768,
+        480
+      ],
+      "id": "b3e8aafb-74a3-456f-97f7-9aa152eac6c8",
+      "name": "OpenRouter Chat Model3",
+      "credentials": {
+        "openRouterApi": {
+          "id": "kh54T9o4h8iCvjlW",
+          "name": "Anagata Openrouter"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-3-pro-preview",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        5568,
+        480
+      ],
+      "id": "1f47d915-dcfe-4555-a9a9-c859b421e9e3",
+      "name": "OpenRouter Chat Model4",
+      "credentials": {
+        "openRouterApi": {
+          "id": "kh54T9o4h8iCvjlW",
+          "name": "Anagata Openrouter"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "=Congratulations your Website is Ready",
+        "completionMessage": "=Please visit : {{ $('On form submission').item.json.domain }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.3,
+      "position": [
+        6832,
+        -112
+      ],
+      "id": "15f11ce5-72e1-41a9-a0cc-305b8b309e9d",
+      "name": "Form",
+      "webhookId": "eed746e2-41e9-4263-a3bf-291cfc7b3884"
+    },
+    {
+      "parameters": {
+        "content": "##  Input & Infrastructure\n1. **Form Trigger:** Receives Domain, User, Pass, and Prompt.\n2. **Config:** Sets global variables.\n3. **Docker:** Generates a `docker-compose.yml` with Traefik labels.\n4. **Deploy:** Sends request to Coolify/Server to start the container.",
+        "height": 400,
+        "width": 1152,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1376,
+        64
+      ],
+      "id": "253099d7-b900-4426-acba-76ab82e0c520",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "WP Core Installation\\n**SSH Node Logic:**\n1. Finds the Docker Container ID.\n2. Downloads/Runs `wp-cli`.\n3. Installs WordPress Core.\n4. Installs Elementor Plugin.\n5. Generates **Application Password** for API access.*Credentials are parsed and passed downstream.*",
+        "height": 416,
+        "width": 624,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2800,
+        64
+      ],
+      "id": "7131f926-0200-420c-82c9-d21ffc7aac2e",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## AI Research Team-\n**Parallel Agents:-**\n **Sitemap AI:** plans the page structure.\n **Researcher:** analyzes the industry.\n **Designer:** picks fonts/colors.\n **Head Developer:** Consolidates all research into a final `Sitemap JSON` array.",
+        "height": 832,
+        "width": 784,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3584,
+        64
+      ],
+      "id": "4c5f9bc3-0f2f-4a55-bc89-3b55f7a223b2",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "##  Global Layout System\nThis node runs **only once**  to generate the \"Source of Truth\":\n1. Global CSS (Variables, Reset).\n2. HTML Header (with Nav Placeholder).\n3. HTML Footer.\n*This ensures every page looks identical.*",
+        "height": 560,
+        "width": 384,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4624,
+        80
+      ],
+      "id": "b28c9a3c-e220-4f37-9ed6-a92a390495bc",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## Phase 5: Content Generation Loop\n1. **Loop:** Iterates through every page in the Sitemap.\n2. **Page AI:** Generates *only* the inner `<body>` content (Sections/Divs).\n3. **Assembler Node:**   - Injects Global Header/Footer.   - Generates Nav Links dynamically.   - Adds JS for Contact Form & logs.\n4. **HTTP Request:** Publishes via WP API using `elementor_canvas`.",
+        "height": 544,
+        "width": 1072,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        5232,
+        80
+      ],
+      "id": "c6913844-422e-4039-8fb6-c8610248af27",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "##  Final Configuration\n**SSH Post-Process:**\n1. Identifies the \\\"Home\\\" page ID.\n2. Sets `show_on_front` = page.\n3. Flushes permalinks to `/%postname%/` so links work.\n4. Sends completion email/form response.",
+        "height": 368,
+        "width": 384,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6352,
+        -304
+      ],
+      "id": "dfe36a6e-c3ac-4a3c-ae47-7a38c79bad2c",
+      "name": "Sticky Note5"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Config Variables7": {
+      "main": [
+        [
+          {
+            "node": "Prepare YAML (Base64)4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare YAML (Base64)4": {
+      "main": [
+        [
+          {
+            "node": "Create Service3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Service3": {
+      "main": [
+        [
+          {
+            "node": "Deploy Service5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deploy Service5": {
+      "main": [
+        [
+          {
+            "node": "Wait for Deployment7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Deployment7": {
+      "main": [
+        [
+          {
+            "node": "SSH - Run Install Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH - Run Install Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Credentials": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Head Website Developer AI": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Site-map Creator AI Agent tool": {
+      "ai_tool": [
+        []
+      ]
+    },
+    "Business Researcher AI Agent Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Head Website Developer AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "website fonts and colors expert AI Agent Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Head Website Developer AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Site-map Creator AI Agent tool",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "website fonts and colors expert AI Agent Tool",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Business Researcher AI Agent Tool",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Head Website Developer AI",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "website fonts and colors expert AI Agent Tool",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Web Search": {
+      "ai_tool": [
+        [
+          {
+            "node": "Business Researcher AI Agent Tool",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Site-map Creator AI Agent tool",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web Search1": {
+      "ai_tool": [
+        [
+          {
+            "node": "website fonts and colors expert AI Agent Tool",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Layout Designer AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Head Website Developer AI",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Head Website Developer AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Config Variables7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Layout Designer AI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Loop": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page Content AI": {
+      "main": [
+        [
+          {
+            "node": "Assemble & Auth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble & Auth": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [
+          {
+            "node": "Execute a command2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Page Content AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Layout Designer AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Page Content AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a command2": {
+      "main": [
+        [
+          {
+            "node": "Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3dd985af-e514-4323-95cc-73b788a8030e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "faaefe2c5c2391acefb232f198fc4136e5862f50b6e4b109093cdec94fb15987"
+  },
+  "id": "hB0ae1qoL41yxx4F",
+  "tags": []
+}
